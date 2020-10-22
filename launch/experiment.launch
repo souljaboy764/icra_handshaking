@@ -1,0 +1,12 @@
+<launch>
+
+	<node name="pepper_promp_naoqi" type="pepper_promp_naoqi.py" pkg="icra_handshaking" output="screen"/>
+	
+    <node name="pepper_joint_reader_1" type="pepper_joint_reader.py" pkg="icra_handshaking" />
+    <node name="pepper_joint_reader_2" type="pepper_joint_reader.py" pkg="icra_handshaking" />
+    <node name="pepper_joint_reader_3" type="pepper_joint_reader.py" pkg="icra_handshaking" />
+    <node name="pepper_joint_reader_4" type="pepper_joint_reader.py" pkg="icra_handshaking" />
+    <node name="pepper_joint_reader_5" type="pepper_joint_reader.py" pkg="icra_handshaking" />
+    
+
+</launch>
