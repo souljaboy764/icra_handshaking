@@ -9,7 +9,6 @@ import time
 import sys
 import os
 import argparse
-
 from util import *
 from networks import Model
 from nuitrack_skeleton_predictor import NuitrackSkeletonPredictor
@@ -22,52 +21,57 @@ import time
 
 import qi
 
+import tf2_ros
+from geometry_msgs.msg import TransformStamped
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from geometry_msgs.msg import TransformStamped
+from sensor_msgs.msg import JointState
+
 
 rospy.init_node('skeleton_predictor')
-IP = "192.168.100.186"
-PORT = 9559
-session = qi.Session()
-try:
-	session.connect("tcp://" + IP + ":" + str(PORT))
-except Exception as e:
-	print(e)
-except RuntimeError:
-	print ("Can't connect to Naoqi at ip \"" + IP + "\" on port " + str(PORT) +".\n"
-			"Please check your script arguments. Run with -h option for help.")
-	sys.exit(1)
+robot_traj_publisher = rospy.Publisher("/pepper_dcm/RightArm_controller/command", JointTrajectory, queue_size=1)
 
 limits_max = [2.08567, -0.00872665, 2.08567, 1.56207]
 limits_min = [-2.08567, -1.56207, -2.08567, 0.00872665]
 bounds = ((limits_min[0], limits_max[0]),(limits_min[1], limits_max[1]),(limits_min[2], limits_max[2]),(limits_min[3], limits_max[3]))
 
-fwd_kin = PepperKinematics()
+fwd_kin = PepperKinematics(lambda_theta=0.5, lambda_x=0.5)
 # basis_model = intprim.basis.PolynomialModel(3, ['joint'+str(i) for i in range(4)])
 basis_model = intprim.basis.GaussianModel(3, 0.1, ['joint'+str(i) for i in range(4)])
 promp = ProMP(basis_model)
 promp.import_data(os.path.join(rospkg.RosPack().get_path('icra_handshaking'), 'skeleton_promp_gaussian_3der.pkl'))
 joint_names = ['RShoulderPitch', 'RShoulderRoll', 'RElbowYaw', 'RElbowRoll', 'RWristYaw']
 
-motion_service = session.service("ALMotion")
-if not motion_service.robotIsWakeUp():
-	motion_service.wakeUp()
-motion_service.setStiffnesses(joint_names, 0.9)
-
 Sigma_cartesian = 1e-4**2*np.eye(3)
-times = np.linspace(0.,1.,45)
-rate = rospy.Rate(1./(times[1]*2))
+times = np.linspace(0.,1.,70)
+rate = rospy.Rate(1./(times[1]*1.5))
 
+joint_trajectory = JointTrajectory()
+joint_trajectory.header.frame_id = "base_link"
+joint_trajectory.joint_names = joint_names
+joint_trajectory.points.append(JointTrajectoryPoint())
+joint_trajectory.points[0].time_from_start = rospy.Duration.from_sec(times[1]*1.5)
 
-# for trial in range(1):
+hand_loc_TF = TransformStamped()
+hand_loc_TF.header.frame_id = "base_link"
+hand_loc_TF.transform.rotation.x = hand_loc_TF.transform.rotation.y = hand_loc_TF.transform.rotation.z = 0
+hand_loc_TF.transform.rotation.w = 1
+
+broadcaster = tf2_ros.StaticTransformBroadcaster()
+
 last_q = np.array([np.pi/2, -0.109, 0, 0.009])
 mu_w_init, Sigma_w_init = promp.get_basis_weight_parameters()
 
 predictor = NuitrackSkeletonPredictor()
 
-while predictor.goal_pred is None:
+while predictor.goal_pred is None and not rospy.is_shutdown():
 	rate.sleep()
 
+if rospy.is_shutdown():
+	exit(-1)
+
 start = datetime.datetime.now()
-# mu_cartesian = np.array([0.25212134, -0.07043525, 0.07195387]) 
+
 for i in range(1,len(times)):
 	rate.sleep()
 
@@ -88,34 +92,43 @@ for i in range(1,len(times)):
 		print(e)
 	
 	#2. sample from conditioned promp
-	samples, w = promp.generate_probable_trajectory(np.array([times[i]]), mu_w_task, Sigma_w_task)
+	samples, w = promp.generate_probable_trajectory(np.array([times[i]]), mu_w_task, np.zeros(Sigma_w_task.shape))
 	last_q = np.clip(samples.T[0], limits_min, limits_max)
 	joint_values = np.hstack([last_q, [np.pi/2]])
+	joint_trajectory.points[0].positions = joint_values
 		
 	#3. publish sample 
-	motion_service.setAngles(joint_names, joint_values.tolist(), 0.2)
+	joint_trajectory.header.stamp = rospy.Time.now()
+	robot_traj_publisher.publish(joint_trajectory)
 	
 	if rospy.is_shutdown():
-	
 		break
 
-# Validating locations
+rate.sleep()
+
+# Validating locations in rviz
 As = fwd_kin.forward_kinematics(last_q)
 promp_pos = As[-1][0:3,3]
-print 'promp pos:',promp_pos
-print 'predictor.goal_pred:', predictor.goal_pred
-print 'diff:',np.linalg.norm(promp_pos - predictor.goal_pred)
 
-As = fwd_kin.forward_kinematics(np.clip(mu_q, limits_min, limits_max))
+hand_loc_TF.transform.translation.x = promp_pos[0]
+hand_loc_TF.transform.translation.y = promp_pos[1]
+hand_loc_TF.transform.translation.z = promp_pos[2]
+hand_loc_TF.child_frame_id = "promp_pose"
+broadcaster.sendTransform(hand_loc_TF)
+
+As = fwd_kin.forward_kinematics(mu_q)
 promp_pos = As[-1][0:3,3]
-print 'mu_q pos:',promp_pos
-print 'predictor.goal_pred:', predictor.goal_pred
-print 'diff:',np.linalg.norm(promp_pos - predictor.goal_pred)
-print np.clip(mu_q, limits_min, limits_max)
+
+hand_loc_TF.transform.translation.x = promp_pos[0]
+hand_loc_TF.transform.translation.y = promp_pos[1]
+hand_loc_TF.transform.translation.z = promp_pos[2]
+hand_loc_TF.child_frame_id = "inv_kin_pose"
+broadcaster.sendTransform(hand_loc_TF)
 
 # Resetting Pepper
-time.sleep(2)
-motion_service.setAngles(joint_names, [np.pi/2, -0.109, 0, 0.009, np.pi/2], 0.2)
-time.sleep(2)
-motion_service.setStiffnesses(joint_names, 0.)
+rospy.Rate(0.2).sleep()
+joint_trajectory.points[0].positions = [np.pi/2, -0.109, 0, 0.009, np.pi/2]
+joint_trajectory.header.stamp = rospy.Time.now()
+robot_traj_publisher.publish(joint_trajectory)
+rospy.Rate(0.5).sleep()
 rospy.signal_shutdown('Finished')
