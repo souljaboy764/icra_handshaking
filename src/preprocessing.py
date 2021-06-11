@@ -10,7 +10,7 @@ from util import *
 warnings.filterwarnings("error")
 	
 
-parser = argparse.ArgumentParser(description='Skeleton (V)AE')
+parser = argparse.ArgumentParser(description='Data Preprocessing and Extracting Joints')
 parser.add_argument('--src-dir', type=str, metavar='S', required=True,
                     help='Directory where the NTURGBD raw skeleton files are stored.')
 parser.add_argument('--dst-dir', type=str, metavar='D', required=True,
@@ -96,7 +96,7 @@ for fname in skeleton_files[:10]:
 				body_transforms[i] = np.dot(rotMat[:3,:3],body_transforms[i]) + rotMat[:3,3]
 			
 			skeletons.append(body_transforms[UPPERBODY])
-			angles.append(skeleton2joints(body_transforms))
+			angles.append(skeleton2joints(body_transforms[25:]))
 			curr_dist = (body_transforms[HANDRIGHT][0] - body_transforms[25+HANDRIGHT][0])**2 + \
 						(body_transforms[HANDRIGHT][1] - body_transforms[25+HANDRIGHT][1])**2 + \
 						(body_transforms[HANDRIGHT][2] - body_transforms[25+HANDRIGHT][2])**2
@@ -132,6 +132,4 @@ for fname in skeleton_files[:10]:
 		print 'skipping',fname
 		continue
 
-# np.savez_compressed(os.path.join(args.dst_dir,'handreach_data.npz'), skeletons=np.array(final_skeletons), joint_angles=np.array(final_angles))
-print(np.shape(final_skeletons[0]))
-print(np.shape(final_angles[0]))
+np.savez_compressed(os.path.join(args.dst_dir,'handreach_data.npz'), skeletons=np.array(final_skeletons), joint_angles=np.array(final_angles))

@@ -1,3 +1,6 @@
+from torch.utils.data import Dataset
+from sklearn.model_selection import train_test_split
+
 from tf.transformations import *
 
 from intprim.util.kinematics import BaseKinematicsClass
@@ -153,7 +156,6 @@ def poseStampedToTransformStamped(pose_stamped, child_frame_id):
 
 	return tf_stamped
 
-
 def skeleton2joints(body_transforms):
 	# Adapted from https://github.com/robertocalandra/firstperson-teleoperation and https://github.com/souljaboy764/skeleton_teleop
 	transforms = []
@@ -185,42 +187,36 @@ def skeleton2joints(body_transforms):
 	rightUpperArm = transforms[ELBOWRIGHT] - transforms[SHOULDERRIGHT]
 	rightUnderArm = transforms[HANDRIGHT] - transforms[ELBOWRIGHT]
 
-	rightYaw = 0
-	rightPitch = 0
-	rightRoll = 0
-	rightElbowAngle = angle(rightUpperArm, rightUnderArm)
+	RElbowRoll = angle(rightUpperArm, rightUnderArm)
 
-	rightYaw = np.arctan2(rightUpperArm[1],-rightUpperArm[2]) # Comes from robot structure
-	rightYaw -=0.009
-	rightPitch = np.arctan(rightUpperArm[0]/rightUpperArm[2]) #Comes from robot structure
-	rightPitch += np.pi/2
-
-	#Recreating under Arm Position with known Angles(without roll)
-	rightRotationAroundY = euler_matrix(0, rightPitch, 0)[:3,:3]
-	rightRotationAroundX = euler_matrix(0, 0, rightYaw)[:3,:3]
-	rightElbowRotation = euler_matrix(0, 0, rightElbowAngle)[:3,:3]
-
+	armlengthRight = np.linalg.norm(rightUpperArm)
 	
+	rightUpperArm[1] = np.clip(rightUpperArm[1], -armlengthRight, 0.0) # limiting based on the robot structure
+	RShoulderRoll = np.pi/2 - np.arccos(rightUpperArm[1]/armlengthRight)
+	RShoulderRoll = np.arctan2(np.sin(RShoulderRoll), np.cos(RShoulderRoll))
+
+	RShoulderPitch = np.arctan2(rightUpperArm[0], rightUpperArm[2]) # Comes from robot structure
+	RShoulderPitch -= np.pi/2
+	RShoulderPitch = np.arctan2(np.sin(RShoulderPitch), np.cos(RShoulderPitch))
+	
+	# Recreating under Arm Position with known Angles(without roll)
+	rightRotationAroundY = euler_matrix(0, RShoulderPitch, 0,)[:3,:3]
+	rightRotationAroundZ = euler_matrix(0, 0, RShoulderRoll)[:3,:3]
+	rightElbowRotation = euler_matrix(0, 0, RElbowRoll)[:3,:3]
+
 	rightUnderArmInZeroPos = np.array([np.linalg.norm(rightUnderArm), 0, 0.])
-	rightUnderArmWithoutRoll = np.dot(rightRotationAroundY,np.dot(rightRotationAroundX,np.dot(rightElbowRotation,rightUnderArmInZeroPos)))
+	rightUnderArmWithoutRoll = np.dot(rightRotationAroundY,np.dot(rightRotationAroundZ,np.dot(rightElbowRotation,rightUnderArmInZeroPos)))
 
-	#calculating the angle betwenn actual under arm position and the one calculated without roll
-	rightRoll = angle(rightUnderArmWithoutRoll, rightUnderArm)
+	# Calculating the angle betwenn actual under arm position and the one calculated without roll
+	RElbowYaw = angle(rightUnderArmWithoutRoll, rightUnderArm)
+	RElbowYaw = np.arctan2(np.sin(RElbowYaw), np.cos(RElbowYaw))
+
+	RShoulderPitch = np.clip(RShoulderPitch, -2.0857, 2.0857)
+	RShoulderRoll = np.clip(RShoulderRoll, -1.5621, -0.009)
+	RElbowYaw = np.clip(RElbowYaw, -2.0857, 2.0857)
+	RElbowRoll = np.clip(RElbowRoll, 0.009, 1.5621)
 	
-	
-	#This is a check which sign the angle has as the calculation only produces positive angles
-	rightRotationAroundArm = euler_matrix(0, 0, -rightRoll)[:3, :3]
-	rightShouldBeWristPos = np.dot(rightRotationAroundY,np.dot(rightRotationAroundX,np.dot(rightRotationAroundArm,np.dot(rightElbowRotation,rightUnderArmInZeroPos))))
-	r1saver = np.linalg.norm(rightUnderArm - rightShouldBeWristPos)
-	
-	rightRotationAroundArm = euler_matrix(0, 0, rightRoll)[:3, :3]
-	rightShouldBeWristPos = np.dot(rightRotationAroundY,np.dot(rightRotationAroundX,np.dot(rightRotationAroundArm,np.dot(rightElbowRotation,rightUnderArmInZeroPos))))
-	r1 = np.linalg.norm(rightUnderArm - rightShouldBeWristPos)
-	
-	if (r1 > r1saver):
-		rightRoll = -rightRoll
-	
-	return np.array([rightYaw, rightPitch, rightRoll, rightElbowAngle])
+	return np.array([RShoulderPitch, RShoulderRoll, RElbowYaw, RElbowRoll])
 
 def visual_skeleton(skeletons, pred=None):
 	fig = plt.figure()
@@ -260,3 +256,50 @@ def visual_skeleton(skeletons, pred=None):
 	plt.ioff()
 	# plt.close("all")
 	plt.show()
+
+class SkeletonSequenceDataset(Dataset):
+	def __init__(self, filename, train=True, padded=True):
+		with open(filename,'rb') as f:
+			data = np.load(f, allow_pickle=True, encoding='bytes')
+			skeletons = data['skeletons']
+		
+		self.sequences = []
+		self.lengths = []
+		max_len = 0
+		if padded:
+			for i in range(len(skeletons)):
+				if len(skeletons[i]) > max_len:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ``````
+					max_len = len(skeletons[i])
+		
+		for i in range(len(skeletons)):
+			self.lengths.append(len(skeletons[i]))
+			if padded:
+				self.sequences.append(__adjust_length(skeletons[i], max_len))
+			else:
+				self.sequences.append(skeletons[i])
+		
+		X_train, X_test, y_train, y_test = train_test_split(self.sequences, self.lengths, test_size=0.2, random_state=42)
+		
+		if train:
+			self.lengths = y_train
+			self.sequences = X_train
+		
+		else:
+			self.lengths = y_test
+			self.sequences = X_test
+		
+	def __len__(self):
+		return len(self.sequences)
+
+	def __getitem__(self, index):
+		return (self.sequences[index], self.lengths[index])
+	
+	def __pad(sequence, length):
+		to_pad = int(length - len(sequence))
+		# pad_seq = np.zeros((to_pad, 19, 3))
+		pad_seq = np.tile(sequence[0],(to_pad,1,1))
+		sequence = np.concatenate([sequence, pad_seq],axis=0)
+		return np.array(sequence).astype(np.float32)
+
+	def __adjust_length(tensor, length):
+		return np.array(tensor[:length]).astype(np.float32) if len(tensor) >= length else __pad(tensor, length)

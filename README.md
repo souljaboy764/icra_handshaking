@@ -1,5 +1,5 @@
 # Learning Human-like Hand Reaching for Human-Robot Handshaking
-This project contains the code for the ICRA 2021 paper "Learning Human-like Hand Reaching for Human-Robot Handshaking". Please cite our paper if you use this work either in part or whole.
+This project contains the code for the ICRA 2021 paper ["Learning Human-like Hand Reaching for Human-Robot Handshaking"](https://arxiv.org/abs/2103.00616). Please cite our paper if you use this work either in part or whole.
 
 ## Prerequisites
 - [pytorch](https://pytorch.org/get-started/locally/)
